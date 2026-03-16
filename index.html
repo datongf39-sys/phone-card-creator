@@ -34,7 +34,7 @@
 
 /* ---- 通用卡片容器 ---- */
 .card-page { width:var(--card-width); height:var(--card-height); background:var(--card-bg); border-radius:12px; box-shadow:0 25px 50px rgba(0,0,0,0.4),0 10px 30px rgba(0,10,20,0.3); position:relative; overflow:hidden; flex-shrink:0; display:flex; flex-direction:column; }
-.card-content { width:100%; color:var(--text-main); flex-grow:1; overflow:hidden; font-family:var(--card-font-family); outline:none; caret-color:var(--blue-link); }
+.card-content { width:100%; color:var(--text-main); flex-grow:1; overflow:hidden; font-family:var(--card-font-family); outline:none; caret-color:var(--blue-link); font-size:calc(24px * var(--base-scale)); line-height:1.8; }
 .card-content * { font-family:inherit !important; }
 .card-content:focus { outline:none; }
 .card-content img { max-width:100%; height:auto; border-radius:8px; margin:20px 0; display:block; }
@@ -633,7 +633,8 @@ function distribute(html) {
         const content=document.createElement('div'); content.className='card-content'; content.contentEditable='true';
         nodes.forEach(n=>content.appendChild(n)); page.appendChild(content);
         if(currentTpl==='default'&&pages.length>1){ const ft=document.createElement('div'); ft.className='card-footer'; ft.textContent=(idx+1)+'/'+pages.length; page.appendChild(ft); }
-        content.addEventListener('input',()=>{ clearTimeout(window._syncT); window._syncT=setTimeout(syncBack,600); });
+        content.addEventListener('input',()=>{ clearTimeout(window._syncT); window._syncT=setTimeout(syncBackAndRerender,800); });
+        content.addEventListener('paste', handlePaste);
         content.addEventListener('keyup',saveSel); content.addEventListener('mouseup',saveSel); content.addEventListener('touchend',()=>setTimeout(saveSel,50));
         wrap.appendChild(page); prevList.appendChild(wrap);
     });
@@ -743,6 +744,37 @@ function syncBack() {
     save();
 }
 
+// 同步后重新分页（直接输入时用）
+function syncBackAndRerender() {
+    syncBack();
+    rerender();
+}
+
+// 拦截粘贴：如果是纯文本且含markdown特征，更新mdSource并重新渲染
+function handlePaste(e) {
+    const clipText = e.clipboardData && e.clipboardData.getData('text/plain');
+    if (!clipText) return;
+    // 检测是否含markdown语法
+    const hasMd = /^#{1,3}\s|^\s*[-*+]\s|\*\*|__|\[.+\]\(.+\)|^>\s|^\d+\.\s|```|---/m.test(clipText);
+    if (hasMd) {
+        e.preventDefault();
+        // 先把当前卡片内容同步回来
+        let curHtml = '';
+        document.querySelectorAll('#preview-list .card-content').forEach(p => curHtml += p.innerHTML);
+        const curMd = curHtml ? turndownService.turndown(curHtml) : '';
+        // 追加粘贴内容
+        mdSource = (curMd || mdSource) ? (curMd || mdSource).trimEnd() + '\n\n' + clipText : clipText;
+        save();
+        rerender();
+        return;
+    }
+    // 普通文本：阻止默认，手动插入纯文本（避免带格式）
+    e.preventDefault();
+    document.execCommand('insertText', false, clipText);
+    clearTimeout(window._syncT);
+    window._syncT = setTimeout(syncBackAndRerender, 800);
+}
+
 // ---- 建卡片头 ----
 function buildHeader(tpl, idx) {
     if(tpl==='weibo') return `<div class="weibo-header"><img src="${wbData.avatar||genAvatar(wbData.name.charAt(0),'#eb7350')}" class="weibo-avatar-img"><div class="weibo-info"><div class="weibo-name">${wbData.name}</div><div class="weibo-meta-row"><div>${wbData.time}</div><div>${wbData.location}</div></div></div></div>`;
@@ -843,7 +875,7 @@ function buildSelToolbar() {
         {t:'<mark style="padding:1px 5px;border-radius:3px">高亮</mark>',fn:()=>{restoreSel();const sel=window.getSelection();if(sel&&!sel.isCollapsed)fmtInsert(`<mark>${sel.toString()}</mark>`);}},
         {t:'颜色',fn:()=>openColorDrawer('color')},
         {t:'高亮色',fn:()=>openColorDrawer('highlight')},
-        {t:'✂分页',fn:()=>{fmtInsert('<hr>');setTimeout(()=>{syncBack();rerender();},100);}},
+        {t:'✂分页',fn:()=>{ restoreSel(); document.execCommand('insertHTML',false,'<hr>'); clearTimeout(window._syncT); window._syncT=setTimeout(syncBackAndRerender,100); hideSelToolbar(); }},
         {t:'居中',fn:()=>{restoreSel();const sel=window.getSelection();if(sel&&!sel.isCollapsed)fmtInsert(`<center>${sel.toString()}</center>`);}},
         {t:'引用',fn:()=>fmtBlock('blockquote')},
         {t:'● 列表',fn:()=>{restoreSel();document.execCommand('insertUnorderedList',false,null);syncBack();}},
